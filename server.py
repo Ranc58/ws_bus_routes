@@ -1,4 +1,5 @@
 import json
+import logging
 
 import trio
 from trio_websocket import serve_websocket, ConnectionClosed
@@ -13,6 +14,7 @@ async def echo_server(request):
         try:
             message = await ws.get_message()
             dict_msg = json.loads(message)
+            logging.info(dict_msg)
             buses.update({
                 dict_msg.get('busId'): dict_msg
             })
@@ -28,7 +30,6 @@ async def talk_to_browser(request):
             "msgType": "Buses",
             "buses": [{"busId": bus['busId'], "lat": bus['lat'], "lng": bus['lng'], "route": bus['route']} for _, bus in buses.items()]
         }, ensure_ascii=False)
-        # print(data, '\n\n')
         await ws.send_message(data)
         await trio.sleep(0.1)
 
@@ -39,6 +40,7 @@ async def main():
         nursery.start_soon(serve_websocket, talk_to_browser, '127.0.0.1', 8000, None)
 
 try:
+    logging.basicConfig(level=logging.INFO)
     trio.run(main)
 except KeyboardInterrupt:
     pass

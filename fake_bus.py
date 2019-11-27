@@ -1,4 +1,5 @@
 import json
+import logging
 import random
 
 import trio
@@ -61,16 +62,17 @@ async def main():
         routes_count_d = 0
         for route in load_routes(routes_count=routes_count):
             routes_count_d += 1
-            for t in range(buses_count):
+            for bus in range(buses_count):
                 send_channel = random.choice(channels)
                 random_bus_index = random.randint(99, 9999)
                 random_bus_id = generate_bus_id(route['name'], random_bus_index)
                 nursery.start_soon(run_bus, send_channel, random_bus_id, route)
                 processed_routes += 1
-            print(processed_routes)
+            logging.info(f'buses send {processed_routes}')
 
 
 try:
+    logging.basicConfig(level=logging.INFO)
     trio.run(main)
 except KeyboardInterrupt:
     pass
