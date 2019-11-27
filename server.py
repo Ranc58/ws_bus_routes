@@ -1,5 +1,6 @@
 import json
 import logging
+from contextlib import suppress
 
 import trio
 from trio_websocket import serve_websocket, ConnectionClosed
@@ -39,8 +40,7 @@ async def main():
         nursery.start_soon(serve_websocket, echo_server, '127.0.0.1', 8080, None)
         nursery.start_soon(serve_websocket, talk_to_browser, '127.0.0.1', 8000, None)
 
-try:
-    logging.basicConfig(level=logging.INFO)
-    trio.run(main)
-except KeyboardInterrupt:
-    pass
+if __name__ == '__main__':
+    with suppress(KeyboardInterrupt):
+        logging.basicConfig(level=logging.INFO)
+        trio.run(main)

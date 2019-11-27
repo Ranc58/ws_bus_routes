@@ -1,8 +1,8 @@
 import json
 import logging
 import random
+from contextlib import suppress
 
-import anyio
 import trio
 import asyncclick as click
 from trio_websocket import open_websocket_url
@@ -47,14 +47,15 @@ async def send_updates(server_address, receive_channel, refresh_timeout):
                 await trio.sleep(refresh_timeout)
 
 
-async def get_channels(nursery, sockets_count, refresh_timeout):
+async def get_channels(nursery, sockets_count, refresh_timeout, host, port):
     send_channels = []
     for _ in range(sockets_count):
         send_channel, receive_channel = trio.open_memory_channel(0)
         async with send_channel, receive_channel:
-            nursery.start_soon(send_updates, 'ws://127.0.0.1:8080', receive_channel.clone(), refresh_timeout)
+            nursery.start_soon(send_updates, f'ws://{host}:{port}', receive_channel.clone(), refresh_timeout)
             send_channels.append(send_channel.clone())
     return send_channels
+
 
 @click.command()
 @click.option("--routes_number", '-r', default=10, help="Number of routes.", show_default=True)
@@ -63,13 +64,15 @@ async def get_channels(nursery, sockets_count, refresh_timeout):
 @click.option("--emulator_id", '-e', default=None, help="ID for buses", show_default=True)
 @click.option("--refresh_timeout", '-rt', default=0.1, help="Timeout for refresh (in secs)", show_default=True)
 @click.option("--log", '-l', is_flag=True, default=False, help="Enable logging", show_default=True)
-async def main(routes_number, buses_per_route, sockets_count, emulator_id, refresh_timeout, log):
+@click.option("--host", '-h', default='127.0.0.1', help="Destination host", show_default=True)
+@click.option("--port", '-p', default='8080', help="Destination port", show_default=True)
+async def main(routes_number, buses_per_route, sockets_count, emulator_id, refresh_timeout, log, host, port):
     if not log:
         logger = logging.getLogger()
         logger.disabled = True
     async with trio.open_nursery() as nursery:
         processed_routes = 0
-        channels = await get_channels(nursery, sockets_count, refresh_timeout)
+        channels = await get_channels(nursery, sockets_count, refresh_timeout, host, port)
         for route in load_routes(routes_count=routes_number):
             for bus in range(buses_per_route):
                 send_channel = random.choice(channels)
@@ -81,8 +84,6 @@ async def main(routes_number, buses_per_route, sockets_count, emulator_id, refre
 
 
 if __name__ == '__main__':
-    try:
+    with suppress(KeyboardInterrupt):
         logging.basicConfig(level=logging.INFO)
         main(_anyio_backend="trio")
-    except KeyboardInterrupt:
-        pass
