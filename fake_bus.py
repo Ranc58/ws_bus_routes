@@ -20,8 +20,8 @@ def relaunch_on_disconnect(async_function, *args, **kwargs):
         receive_channel = args[1]
         async with receive_channel:
             while True:
+                logging.info('Start send channel')
                 try:
-                    logging.info('Start send channel')
                     await async_function(*args, **kwargs)
                 except (
                         ConnectionClosed,
@@ -29,7 +29,7 @@ def relaunch_on_disconnect(async_function, *args, **kwargs):
                         ConnectionRefusedError,
                         HandshakeError
                 ):
-                    logging.error(f'Error. Try reconnect in 2 sec ')
+                    logging.error(f'Try reconnect in 2 sec ')
                     time.sleep(2)
     return run_fake_bus
 
