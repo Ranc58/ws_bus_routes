@@ -1,35 +1,61 @@
 import json
 import logging
 import random
+import time
 from contextlib import suppress
+from functools import wraps
 
 import trio
 import asyncclick as click
-from trio_websocket import open_websocket_url
+from trio import BrokenResourceError
+from trio_websocket import open_websocket_url, HandshakeError, ConnectionClosed
 
 from load_routes import load_routes
 
 
-async def run_bus(send_channel, bus_id, route):
+def relaunch_on_disconnect(async_function, *args, **kwargs):
 
+    @wraps(async_function)
+    async def run_fake_bus(*args, **kwargs):
+        receive_channel = args[1]
+        async with receive_channel:
+            while True:
+                try:
+                    logging.info('Start send channel')
+                    await async_function(*args, **kwargs)
+                except (
+                        ConnectionClosed,
+                        ConnectionError,
+                        ConnectionRefusedError,
+                        HandshakeError
+                ):
+                    logging.error(f'Error. Try reconnect in 2 sec ')
+                    time.sleep(2)
+    return run_fake_bus
+
+
+
+async def run_bus(send_channel, bus_id, route):
     start_offset = random.randint(1, len(route['coordinates']))
     first_run = True
-    while True:
-        route_coords = route['coordinates']
-        if first_run:
-            route_coords = route['coordinates'][start_offset:]
-        for coords in route_coords:
-            lat = coords[0]
-            lng = coords[1]
-            data_for_send = json.dumps({
-                "busId": bus_id,
-                "lat": lat,
-                "lng": lng,
-                "route": route['name']
-            }, ensure_ascii=False)
-            await send_channel.send(data_for_send)
-            await trio.sleep(0.1)
-        first_run = False
+    async with send_channel:
+        while True:
+            route_coords = route['coordinates']
+            if first_run:
+                route_coords = route['coordinates'][start_offset:]
+            for coords in route_coords:
+                lat = coords[0]
+                lng = coords[1]
+                data_for_send = json.dumps({
+                    "busId": bus_id,
+                    "lat": lat,
+                    "lng": lng,
+                    "route": route['name']
+                }, ensure_ascii=False)
+                await send_channel.send(data_for_send)
+                await trio.sleep(0.1)
+
+            first_run = False
 
 
 def generate_bus_id(route_id, bus_index, emulator_id):
@@ -39,12 +65,12 @@ def generate_bus_id(route_id, bus_index, emulator_id):
     return uniq_bus_id
 
 
+@relaunch_on_disconnect
 async def send_updates(server_address, receive_channel, refresh_timeout):
     async with open_websocket_url(server_address) as ws:
-        async with receive_channel:
-            async for value in receive_channel:
-                await ws.send_message(value)
-                await trio.sleep(refresh_timeout)
+        async for value in receive_channel:
+            await ws.send_message(value)
+            await trio.sleep(refresh_timeout)
 
 
 async def get_channels(nursery, sockets_count, refresh_timeout, host, port):
@@ -52,7 +78,12 @@ async def get_channels(nursery, sockets_count, refresh_timeout, host, port):
     for _ in range(sockets_count):
         send_channel, receive_channel = trio.open_memory_channel(0)
         async with send_channel, receive_channel:
-            nursery.start_soon(send_updates, f'ws://{host}:{port}', receive_channel.clone(), refresh_timeout)
+            nursery.start_soon(
+                send_updates,
+                f'ws://{host}:{port}',
+                receive_channel.clone(),
+                refresh_timeout
+            )
             send_channels.append(send_channel.clone())
     return send_channels
 
