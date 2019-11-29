@@ -7,7 +7,6 @@ from functools import wraps
 
 import trio
 import asyncclick as click
-from trio import BrokenResourceError
 from trio_websocket import open_websocket_url, HandshakeError, ConnectionClosed
 
 from load_routes import load_routes
