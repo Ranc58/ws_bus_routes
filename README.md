@@ -13,7 +13,7 @@ Python version required: 3.7+
 
 # How to launch
 1) Run `server.py`. \
-This ws server (with default setings) will listen incoming messages `127.0.0.1:8080` and send messages to `127.0.0.1:8080`\
+This ws server (with default settings) will listen incoming messages `127.0.0.1:8080` and send messages to `127.0.0.1:8080`\
 CLI args for `server.py`:
 ```
 Options:
