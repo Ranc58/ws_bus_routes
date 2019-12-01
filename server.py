@@ -1,73 +1,85 @@
 import json
 import logging
 from contextlib import suppress
+from dataclasses import dataclass
 
 import trio
-from trio import WouldBlock
 from trio_websocket import serve_websocket, ConnectionClosed
 
 buses = {}
 
 
-async def talk_to_browser(request):
-    global buses
-    ws = await request.accept()
-    send_channel, receive_channel = trio.open_memory_channel(0)
-    async with send_channel, receive_channel:
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(send_browser,  ws, receive_channel.clone())
-            nursery.start_soon(listen_browser, ws, send_channel.clone())
+@dataclass
+class Bus:
+    busId: int
+    lat: float
+    lng: float
+    route: str
 
 
-async def listen_browser(ws, send_channel):
-    async with send_channel:
-        while True:
-            try:
-                message = await ws.get_message()
-            except ConnectionClosed:
-                break
-            else:
-                await send_channel.send(message)
-            logging.info(message)
+
+@dataclass
+class WindowBounds:
+    south_lat: float
+    north_lat: float
+    west_lng: float
+    east_lng: float
+
+    def is_inside(self, lat, lng):
+        south_lat = self.south_lat
+        north_lat = self.north_lat
+        west_lng = self.west_lng
+        east_lng = self.east_lng
+        return south_lat <= lat <= north_lat and west_lng <= lng <= east_lng
 
 
 def is_inside(bounds, lat, lng):
     if not bounds:
         return
-    bounds = json.loads(bounds)
-    coords = bounds.get('data')
-    south_lat = coords.get('south_lat')
-    north_lat = coords.get('north_lat')
-    west_lng = coords.get('west_lng')
-    east_lng = coords.get('east_lng')
+    south_lat = bounds.south_lat
+    north_lat = bounds.north_lat
+    west_lng = bounds.west_lng
+    east_lng = bounds.east_lng
     return south_lat <= lat <= north_lat and west_lng <= lng <= east_lng
 
 
-async def send_browser(ws, receive_channel):
-    async with receive_channel:
-        screen_coords = None
-        while True:
-            try:
-                screen_coords_msg = receive_channel.receive_nowait()
-            except WouldBlock:
-                pass
-            else:
-                screen_coords = screen_coords_msg
+async def listen_browser(ws):
+    while True:
+        try:
+            msg = await ws.get_message()
+        except ConnectionClosed:
+            break
+        logging.info(msg)
+        await trio.sleep(0)
 
-            data = json.dumps({
-                "msgType": "Buses",
-                "buses": [{
-                    "busId": bus['busId'],
-                    "lat": bus['lat'],
-                    "lng": bus['lng'],
-                    "route": bus['route']
-                } for _, bus in buses.items() if is_inside(screen_coords, bus['lat'], bus['lng'])
-                ]}, ensure_ascii=False)
-            try:
-                await ws.send_message(data)
-            except ConnectionClosed:
-                break
-            await trio.sleep(0.1)
+
+async def send_buses(ws, bounds):
+    buses_data = {
+        "msgType": "Buses",
+        "buses": [{
+            "busId": bus.busId,
+            "lat": bus.lat,
+            "lng": bus.lng,
+            "route": bus.route
+        } for _, bus in buses.items() if bounds.is_inside(bus.lat, bus.lng)
+        ]}
+    data = json.dumps(buses_data, ensure_ascii=False)
+    logging.info(f"{len(buses_data['buses'])} buses inside bounds")
+    await ws.send_message(data)
+
+
+async def talk_to_browser(request):
+    global buses
+    ws = await request.accept()
+    while True:
+        try:
+            bounds = await ws.get_message()
+        except ConnectionClosed:
+            break
+        data_for_windows_bound = json.loads(bounds)
+        windows_bounds = WindowBounds(**data_for_windows_bound['data'])
+        await send_buses(ws, windows_bounds)
+        await trio.sleep(0.1)
 
 
 async def gates_listener(request):
@@ -77,8 +89,9 @@ async def gates_listener(request):
         try:
             message = await ws.get_message()
             dict_msg = json.loads(message)
-            logging.info(dict_msg)
-            buses.update({dict_msg.get('busId'): dict_msg})
+            bus = Bus(**dict_msg)
+            # logging.info(dict_msg) todo back
+            buses.update({bus.busId: bus})
         except ConnectionClosed:
             break
 
