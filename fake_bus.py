@@ -19,7 +19,7 @@ def relaunch_on_disconnect(async_function, *args, **kwargs):
         receive_channel = args[1]
         async with receive_channel:
             while True:
-                logging.info('Start send channel')
+                logger.debug('Start send channel')
                 try:
                     await async_function(*args, **kwargs)
                 except (
@@ -28,7 +28,7 @@ def relaunch_on_disconnect(async_function, *args, **kwargs):
                         ConnectionRefusedError,
                         HandshakeError
                 ):
-                    logging.error(f'Try reconnect in 2 sec ')
+                    logger.error(f'Try reconnect in 2 sec ')
                     time.sleep(2)
     return run_fake_bus
 
@@ -97,8 +97,8 @@ async def get_channels(nursery, sockets_count, refresh_timeout, host, port):
 @click.option("--port", '-p', default='8080', help="Destination port", show_default=True)
 async def main(routes_number, buses_per_route, sockets_count, emulator_id, refresh_timeout, log, host, port):
     if not log:
-        logger = logging.getLogger()
-        logger.disabled = True
+        app_logger = logging.getLogger('app_logger')
+        app_logger.disabled = True
     async with trio.open_nursery() as nursery:
         processed_routes = 0
         channels = await get_channels(nursery, sockets_count, refresh_timeout, host, port)
@@ -109,10 +109,13 @@ async def main(routes_number, buses_per_route, sockets_count, emulator_id, refre
                 random_bus_id = generate_bus_id(route['name'], random_bus_index, emulator_id)
                 nursery.start_soon(run_bus, send_channel, random_bus_id, route)
                 processed_routes += 1
-            logging.info(f'buses send {processed_routes}')
+            logger.debug(f'buses send {processed_routes}')
 
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
-        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger('app_logger')
+        handler = logging.StreamHandler()
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
         main(_anyio_backend="trio")

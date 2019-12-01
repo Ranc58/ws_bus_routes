@@ -73,7 +73,7 @@ async def send_buses(ws, bounds):
                 "route": bus.route
             } for _, bus in buses.items() if bounds.is_inside(bus.lat, bus.lng)
             ]}
-        logging.info(f"{len(buses_data['buses'])} buses inside bounds")
+        logger.debug(f"{len(buses_data['buses'])} buses inside bounds")
     data = json.dumps(buses_data, ensure_ascii=False)
     await ws.send_message(data)
 
@@ -95,12 +95,12 @@ def check_message(message, source_type):
         result['errors'] = ['Requires valid JSON']
         return result
     else:
-        result['data'] = msg_data.get('data')
+        result['data'] = msg_data.get('data', msg_data)
+
     check_funcs = {
         'browser': check_browser_message,
         'bus': check_gates_message,
     }
-
     func_for_check = check_funcs.get(source_type)
     if not func_for_check:
         result['errors'] = ['Unknown data source']
@@ -115,7 +115,7 @@ async def listen_browser(ws, bounds):
             msg = await ws.get_message()
         except ConnectionClosed:
             break
-        logging.info(msg)
+        logger.debug(msg)
         msg_data = check_message(msg, 'browser')
         errors = msg_data.get('errors')
         if errors:
@@ -161,7 +161,7 @@ async def gates_listener(request):
             else:
                 dict_msg = msg_data.get('data')
                 bus = Bus(**dict_msg)
-                logging.info(dict_msg)
+                logger.debug(dict_msg)
                 buses.update({bus.busId: bus})
         except ConnectionClosed:
             break
@@ -174,7 +174,7 @@ async def gates_listener(request):
 @click.option("--log", '-l', is_flag=True, default=False, help="Enable logging", show_default=True)
 async def main(imitator_host, imitator_port, browser_port, log):
     if not log:
-        logger = logging.getLogger()
+        logger = logging.getLogger('app_logger')
         logger.disabled = True
     async with trio.open_nursery() as nursery:
         nursery.start_soon(serve_websocket, gates_listener, imitator_host, imitator_port, None)
@@ -182,5 +182,8 @@ async def main(imitator_host, imitator_port, browser_port, log):
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
-        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger('app_logger')
+        handler = logging.StreamHandler()
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
         main(_anyio_backend="trio")
