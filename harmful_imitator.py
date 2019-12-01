@@ -4,14 +4,23 @@ import random
 from contextlib import suppress
 
 
-import asyncclick as click
 import trio
+import asyncclick as click
 from trio_websocket import open_websocket_url, ConnectionClosed
 
 
 ERROR_MESSAGES = {
-    'client': ['error json', json.dumps({'msgType': 'ErrorMsgType'})],
-    'bus': ['error json', json.dumps({'lat': 36.2})],
+    'client': [
+        'error json',
+        json.dumps({'msgType': 'ErrorMsgType'}),
+        json.dumps({'msgType': 'newBounds', "data": {'lat': 20, 'north_lat': 30}}),
+        json.dumps({"data": {'east_lng': 20, 'north_lat': 20, 'south_lat': 20, 'west_lng': 35}}),
+    ],
+    'bus': [
+        'error json',
+        json.dumps({'lat': 36.2}),
+        json.dumps({'BusId': 12, "lat": "error"}),
+    ],
 }
 
 

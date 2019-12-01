@@ -33,7 +33,6 @@ def relaunch_on_disconnect(async_function, *args, **kwargs):
     return run_fake_bus
 
 
-
 async def run_bus(send_channel, bus_id, route):
     start_offset = random.randint(1, len(route['coordinates']))
     first_run = True

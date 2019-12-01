@@ -9,6 +9,8 @@ import trio
 import asyncclick as click
 from trio_websocket import serve_websocket, ConnectionClosed
 
+from serializers import BusSchema, WindowBoundSchema
+
 buses = {}
 
 
@@ -77,21 +79,11 @@ async def send_buses(ws, bounds):
 
 
 def check_browser_message(msg_data):
-    error = None
-    msg_type = msg_data.get('msgType')
-    if not msg_type:
-        error = ['Requires msgType specified']
-    elif msg_type != 'newBounds':
-        error = ['Incorrect msgType specified']
-    return error
+    return WindowBoundSchema().validate(data=msg_data)
 
 
 def check_gates_message(msg_data):
-    error = None
-    bus_id = msg_data.get('bus_id')
-    if not bus_id:
-        error = ['Requires busId specified']
-    return error
+    return BusSchema().validate(data=msg_data)
 
 
 def check_message(message, source_type):
