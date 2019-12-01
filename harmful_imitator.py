@@ -27,7 +27,7 @@ ERROR_MESSAGES = {
 @click.command()
 @click.option("--log", '-l', is_flag=True, default=False, help="Enable logging", show_default=True)
 @click.option("--host", '-h', default='127.0.0.1', help="Destination host", show_default=True)
-@click.option("--port", '-p', default='8000', help="Destination port", show_default=True)
+@click.option("--port", '-p', default=8000, help="Destination port", show_default=True)
 @click.option("--imitator_type", '-it', default='client', help="Type of imitator(client/bus)", show_default=True)
 async def main(log, host, port, imitator_type):
     if not log:
