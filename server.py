@@ -1,7 +1,9 @@
 import json
 import logging
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from json import JSONDecodeError
+from typing import List
 
 import trio
 import asyncclick as click
@@ -24,6 +26,7 @@ class WindowBounds:
     north_lat: float = 0
     west_lng: float = 0
     east_lng: float = 0
+    errors: List = field(default_factory=list)
 
     def is_inside(self, lat, lng):
         south_lat = self.south_lat
@@ -38,6 +41,9 @@ class WindowBounds:
         self.west_lng = west_lng
         self.east_lng = east_lng
 
+    def add_errors(self, errors):
+        self.errors = errors
+
 
 def is_inside(bounds, lat, lng):
     if not bounds:
@@ -50,18 +56,62 @@ def is_inside(bounds, lat, lng):
 
 
 async def send_buses(ws, bounds):
-    buses_data = {
-        "msgType": "Buses",
-        "buses": [{
-            "busId": bus.busId,
-            "lat": bus.lat,
-            "lng": bus.lng,
-            "route": bus.route
-        } for _, bus in buses.items() if bounds.is_inside(bus.lat, bus.lng)
-        ]}
+    if bounds.errors:
+        buses_data = {
+            "msgType": "errors",
+            "errors": bounds.errors
+        }
+    else:
+        buses_data = {
+            "msgType": "Buses",
+            "buses": [{
+                "busId": bus.busId,
+                "lat": bus.lat,
+                "lng": bus.lng,
+                "route": bus.route
+            } for _, bus in buses.items() if bounds.is_inside(bus.lat, bus.lng)
+            ]}
+        logging.info(f"{len(buses_data['buses'])} buses inside bounds")
     data = json.dumps(buses_data, ensure_ascii=False)
-    logging.info(f"{len(buses_data['buses'])} buses inside bounds")
     await ws.send_message(data)
+
+
+def check_browser_message(msg_data):
+    error = None
+    msg_type = msg_data.get('msgType')
+    if not msg_type:
+        error = ['Requires msgType specified']
+    elif msg_type != 'newBounds':
+        error = ['Incorrect msgType specified']
+    return error
+
+
+def check_gates_message(msg_data):
+    error = None
+    return error
+
+
+def check_message(message, source_type):
+
+    result = {'errors': None, "data": message}
+    try:
+        msg_data = json.loads(message)
+    except JSONDecodeError:
+        result['errors'] = ['Requires valid JSON']
+        return result
+    else:
+        result['data'] = msg_data.get('data')
+    check_funcs = {
+        'browser': check_browser_message,
+        'gates': check_gates_message,
+    }
+
+    func_for_check = check_funcs.get(source_type)
+    if not func_for_check:
+        result['errors'] = ['Unknown data source']
+    else:
+        result['errors'] = func_for_check(msg_data)
+    return result
 
 
 async def listen_browser(ws, bounds):
@@ -71,9 +121,13 @@ async def listen_browser(ws, bounds):
         except ConnectionClosed:
             break
         logging.info(msg)
-        msg_data = json.loads(msg)
-        coords_data = msg_data.get('data')
-        bounds.update(**coords_data)
+        msg_data = check_message(msg, 'browser')
+        errors = msg_data.get('errors')
+        if errors:
+            bounds.add_errors(errors)
+        else:
+            coords_data = msg_data.get('data')
+            bounds.update(**coords_data)
 
 
 async def talk_to_browser(ws, bounds):
