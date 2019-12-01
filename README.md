@@ -41,5 +41,19 @@ Options:
 3) Open on your browser `frontend\index.html`.
 
 
+
+And you can use `harmful_imitator.py` for test incorrect incoming values from bus/browser to `server.py`. \
+CLI args for `harmful_imitator.py`:
+```
+Options:
+  -l, --log                  Enable logging  [default: False]
+  -h, --host TEXT            Destination host  [default: 127.0.0.1]
+  -p, --port TEXT            Destination port  [default: 8000]
+  -it, --imitator_type TEXT  Type of imitator(client/bus)  [default: client]
+  --help                     Show this message and exit.
+
+```
+
+
 # Project Goals
 The code is written for educational purposes. Training course for web-developers - [DVMN.org](https://dvmn.org)

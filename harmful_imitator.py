@@ -8,16 +8,19 @@ import asyncclick as click
 import trio
 from trio_websocket import open_websocket_url, ConnectionClosed
 
-ERROR_MESSAGES = [
-    'error json',
-    json.dumps({'msgType': 'ErrorMsgType'})
-]
+
+ERROR_MESSAGES = {
+    'client': ['error json', json.dumps({'msgType': 'ErrorMsgType'})],
+    'bus': ['error json', json.dumps({'lat': 36.2})],
+}
+
 
 @click.command()
 @click.option("--log", '-l', is_flag=True, default=False, help="Enable logging", show_default=True)
 @click.option("--host", '-h', default='127.0.0.1', help="Destination host", show_default=True)
 @click.option("--port", '-p', default='8000', help="Destination port", show_default=True)
-async def main(log, host, port):
+@click.option("--imitator_type", '-it', default='client', help="Type of imitator(client/bus)", show_default=True)
+async def main(log, host, port, imitator_type):
     if not log:
         logger = logging.getLogger()
         logger.disabled = True
@@ -25,13 +28,14 @@ async def main(log, host, port):
     async with open_websocket_url(url) as ws:
         while True:
             try:
-                error_message = random.choice(ERROR_MESSAGES)
+                error_message = random.choice(ERROR_MESSAGES.get(imitator_type))
                 await ws.send_message(error_message)
                 logging.info(f'Sent message "{error_message}" to {url}')
                 message = await ws.get_message()
                 logging.info(f'Received message: {message}')
             except (OSError, ConnectionClosed) as e:
                 logging.error(f'Connection failed: {e}')
+                break
             await trio.sleep(1)
 
 

@@ -88,6 +88,9 @@ def check_browser_message(msg_data):
 
 def check_gates_message(msg_data):
     error = None
+    bus_id = msg_data.get('bus_id')
+    if not bus_id:
+        error = ['Requires busId specified']
     return error
 
 
@@ -103,7 +106,7 @@ def check_message(message, source_type):
         result['data'] = msg_data.get('data')
     check_funcs = {
         'browser': check_browser_message,
-        'gates': check_gates_message,
+        'bus': check_gates_message,
     }
 
     func_for_check = check_funcs.get(source_type)
@@ -155,10 +158,19 @@ async def gates_listener(request):
     while True:
         try:
             message = await ws.get_message()
-            dict_msg = json.loads(message)
-            bus = Bus(**dict_msg)
-            logging.info(dict_msg)
-            buses.update({bus.busId: bus})
+            msg_data = check_message(message, 'bus')
+            errors = msg_data.get('errors')
+            if errors:
+                error_message = json.dumps({
+                    "msgType": "errors",
+                    "errors": errors
+                })
+                await ws.send_message(error_message)
+            else:
+                dict_msg = msg_data.get('data')
+                bus = Bus(**dict_msg)
+                logging.info(dict_msg)
+                buses.update({bus.busId: bus})
         except ConnectionClosed:
             break
 
