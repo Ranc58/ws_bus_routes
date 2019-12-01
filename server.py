@@ -4,6 +4,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 import trio
+import asyncclick as click
 from trio_websocket import serve_websocket, ConnectionClosed
 
 buses = {}
@@ -86,8 +87,9 @@ async def talk_to_browser(ws, bounds):
 
 
 async def browser_proccess(request):
-    bounds = WindowBounds()
     ws = await request.accept()
+    bounds = WindowBounds()
+    # Here we use mutable arg "bounds" (changes in function "listen_browser")
     async with trio.open_nursery() as nursery:
         nursery.start_soon(listen_browser, ws, bounds)
         nursery.start_soon(talk_to_browser, ws, bounds)
@@ -107,12 +109,20 @@ async def gates_listener(request):
             break
 
 
-async def main():
+@click.command()
+@click.option("--imitator_host", '-ih', default='127.0.0.1', help="Bus imitator host", show_default=True)
+@click.option("--imitator_port", '-ip', default=8080, help="Bus imitator port", show_default=True)
+@click.option("--browser_port", '-bp', default=8000, help="Browser port", show_default=True)
+@click.option("--log", '-l', is_flag=True, default=False, help="Enable logging", show_default=True)
+async def main(imitator_host, imitator_port, browser_port, log):
+    if not log:
+        logger = logging.getLogger()
+        logger.disabled = True
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(serve_websocket, gates_listener, '127.0.0.1', 8080, None)
-        nursery.start_soon(serve_websocket, browser_proccess, '127.0.0.1', 8000, None)
+        nursery.start_soon(serve_websocket, gates_listener, imitator_host, imitator_port, None)
+        nursery.start_soon(serve_websocket, browser_proccess, '127.0.0.1', browser_port, None)
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
         logging.basicConfig(level=logging.INFO)
-        trio.run(main)
+        main(_anyio_backend="trio")
