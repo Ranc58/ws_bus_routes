@@ -17,13 +17,12 @@ class Bus:
     route: str
 
 
-
 @dataclass
 class WindowBounds:
-    south_lat: float
-    north_lat: float
-    west_lng: float
-    east_lng: float
+    south_lat: float = 0
+    north_lat: float = 0
+    west_lng: float = 0
+    east_lng: float = 0
 
     def is_inside(self, lat, lng):
         south_lat = self.south_lat
@@ -31,6 +30,12 @@ class WindowBounds:
         west_lng = self.west_lng
         east_lng = self.east_lng
         return south_lat <= lat <= north_lat and west_lng <= lng <= east_lng
+
+    def update(self, south_lat, north_lat, west_lng, east_lng):
+        self.south_lat = south_lat
+        self.north_lat = north_lat
+        self.west_lng = west_lng
+        self.east_lng = east_lng
 
 
 def is_inside(bounds, lat, lng):
@@ -41,16 +46,6 @@ def is_inside(bounds, lat, lng):
     west_lng = bounds.west_lng
     east_lng = bounds.east_lng
     return south_lat <= lat <= north_lat and west_lng <= lng <= east_lng
-
-
-async def listen_browser(ws):
-    while True:
-        try:
-            msg = await ws.get_message()
-        except ConnectionClosed:
-            break
-        logging.info(msg)
-        await trio.sleep(0)
 
 
 async def send_buses(ws, bounds):
@@ -68,18 +63,34 @@ async def send_buses(ws, bounds):
     await ws.send_message(data)
 
 
-async def talk_to_browser(request):
-    global buses
-    ws = await request.accept()
+async def listen_browser(ws, bounds):
     while True:
         try:
-            bounds = await ws.get_message()
+            msg = await ws.get_message()
         except ConnectionClosed:
             break
-        data_for_windows_bound = json.loads(bounds)
-        windows_bounds = WindowBounds(**data_for_windows_bound['data'])
-        await send_buses(ws, windows_bounds)
+        logging.info(msg)
+        msg_data = json.loads(msg)
+        coords_data = msg_data.get('data')
+        bounds.update(**coords_data)
+
+
+async def talk_to_browser(ws, bounds):
+    global buses
+    while True:
+        try:
+            await send_buses(ws, bounds)
+        except ConnectionClosed:
+            break
         await trio.sleep(0.1)
+
+
+async def browser_proccess(request):
+    bounds = WindowBounds()
+    ws = await request.accept()
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(listen_browser, ws, bounds)
+        nursery.start_soon(talk_to_browser, ws, bounds)
 
 
 async def gates_listener(request):
@@ -90,7 +101,7 @@ async def gates_listener(request):
             message = await ws.get_message()
             dict_msg = json.loads(message)
             bus = Bus(**dict_msg)
-            # logging.info(dict_msg) todo back
+            logging.info(dict_msg)
             buses.update({bus.busId: bus})
         except ConnectionClosed:
             break
@@ -99,7 +110,7 @@ async def gates_listener(request):
 async def main():
     async with trio.open_nursery() as nursery:
         nursery.start_soon(serve_websocket, gates_listener, '127.0.0.1', 8080, None)
-        nursery.start_soon(serve_websocket, talk_to_browser, '127.0.0.1', 8000, None)
+        nursery.start_soon(serve_websocket, browser_proccess, '127.0.0.1', 8000, None)
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
