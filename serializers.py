@@ -2,7 +2,7 @@ from marshmallow import Schema, fields, validate
 
 
 class BusSchema(Schema):
-    BusId = fields.Integer(required=True)
+    busId = fields.String(required=True)
     lat = fields.Float(required=True)
     lng = fields.Float(required=True)
     route = fields.String(required=True)
