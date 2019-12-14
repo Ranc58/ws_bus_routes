@@ -1,7 +1,6 @@
 import json
 import logging
 import random
-import time
 from contextlib import suppress
 from functools import wraps
 
@@ -11,25 +10,25 @@ from trio_websocket import open_websocket_url, HandshakeError, ConnectionClosed
 
 from load_routes import load_routes
 
+logger = logging.getLogger('app_logger')
+
 
 def relaunch_on_disconnect(async_function, *args, **kwargs):
 
     @wraps(async_function)
     async def run_fake_bus(*args, **kwargs):
-        receive_channel = args[1]
-        async with receive_channel:
-            while True:
-                logger.debug('Start send channel')
-                try:
-                    await async_function(*args, **kwargs)
-                except (
-                        ConnectionClosed,
-                        ConnectionError,
-                        ConnectionRefusedError,
-                        HandshakeError
-                ):
-                    logger.error(f'Try reconnect in 2 sec ')
-                    time.sleep(2)
+        while True:
+            logger.debug('Start send channel')
+            try:
+                await async_function(*args, **kwargs)
+            except (
+                    ConnectionClosed,
+                    ConnectionError,
+                    ConnectionRefusedError,
+                    HandshakeError
+            ):
+                logger.error(f'Try reconnect in 2 sec ')
+                await trio.sleep(2)
     return run_fake_bus
 
 
@@ -71,21 +70,6 @@ async def send_updates(server_address, receive_channel, refresh_timeout):
             await trio.sleep(refresh_timeout)
 
 
-async def get_channels(nursery, sockets_count, refresh_timeout, host, port):
-    send_channels = []
-    for _ in range(sockets_count):
-        send_channel, receive_channel = trio.open_memory_channel(0)
-        async with send_channel, receive_channel:
-            nursery.start_soon(
-                send_updates,
-                f'ws://{host}:{port}',
-                receive_channel.clone(),
-                refresh_timeout
-            )
-            send_channels.append(send_channel.clone())
-    return send_channels
-
-
 @click.command()
 @click.option("--routes_number", '-r', default=10, help="Number of routes.", show_default=True)
 @click.option("--buses_per_route", '-b', default=5, help="Number of buses per one route", show_default=True)
@@ -97,14 +81,22 @@ async def get_channels(nursery, sockets_count, refresh_timeout, host, port):
 @click.option("--port", '-p', default='8080', help="Destination port", show_default=True)
 async def main(routes_number, buses_per_route, sockets_count, emulator_id, refresh_timeout, log, host, port):
     if not log:
-        app_logger = logging.getLogger('app_logger')
-        app_logger.disabled = True
+        logger.disabled = True
     async with trio.open_nursery() as nursery:
         processed_routes = 0
-        channels = await get_channels(nursery, sockets_count, refresh_timeout, host, port)
+        send_channels = []
+        for _ in range(sockets_count):
+            send_channel, receive_channel = trio.open_memory_channel(0)
+            nursery.start_soon(
+                send_updates,
+                f'ws://{host}:{port}',
+                receive_channel,
+                refresh_timeout
+            )
+            send_channels.append(send_channel)
         for route in load_routes(routes_count=routes_number):
             for bus in range(buses_per_route):
-                send_channel = random.choice(channels)
+                send_channel = random.choice(send_channels)
                 random_bus_index = random.randint(99, 9999)
                 random_bus_id = generate_bus_id(route['name'], random_bus_index, emulator_id)
                 nursery.start_soon(run_bus, send_channel, random_bus_id, route)
@@ -114,7 +106,6 @@ async def main(routes_number, buses_per_route, sockets_count, emulator_id, refre
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
-        logger = logging.getLogger('app_logger')
         handler = logging.StreamHandler()
         logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)

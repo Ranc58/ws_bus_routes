@@ -12,6 +12,7 @@ from trio_websocket import serve_websocket, ConnectionClosed
 from serializers import BusSchema, WindowBoundSchema
 
 buses = {}
+logger = logging.getLogger('app_logger')
 
 
 @dataclass
@@ -58,22 +59,16 @@ def is_inside(bounds, lat, lng):
 
 
 async def send_buses(ws, bounds):
-    if bounds.errors:
-        buses_data = {
-            "msgType": "errors",
-            "errors": bounds.errors
-        }
-    else:
-        buses_data = {
-            "msgType": "Buses",
-            "buses": [{
-                "busId": bus.busId,
-                "lat": bus.lat,
-                "lng": bus.lng,
-                "route": bus.route
-            } for _, bus in buses.items() if bounds.is_inside(bus.lat, bus.lng)
-            ]}
-        logger.debug(f"{len(buses_data['buses'])} buses inside bounds")
+    buses_data = {
+        "msgType": "Buses",
+        "buses": [{
+            "busId": bus.busId,
+            "lat": bus.lat,
+            "lng": bus.lng,
+            "route": bus.route
+        } for _, bus in buses.items() if bounds.is_inside(bus.lat, bus.lng)
+        ]}
+    logger.debug(f"{len(buses_data['buses'])} buses inside bounds")
     data = json.dumps(buses_data, ensure_ascii=False)
     await ws.send_message(data)
 
@@ -87,7 +82,6 @@ def check_gates_message(msg_data):
 
 
 def check_message(message, source_type):
-
     result = {'errors': None, "data": message}
     try:
         msg_data = json.loads(message)
@@ -120,6 +114,13 @@ async def listen_browser(ws, bounds):
         errors = msg_data.get('errors')
         if errors:
             bounds.add_errors(errors)
+            buses_data = {
+                "msgType": "errors",
+                "errors": errors
+            }
+
+            data = json.dumps(buses_data, ensure_ascii=False)
+            await ws.send_message(data)
         else:
             coords_data = msg_data.get('data')
             bounds.update(**coords_data)
@@ -129,13 +130,14 @@ async def talk_to_browser(ws, bounds):
     global buses
     while True:
         try:
-            await send_buses(ws, bounds)
+            if not bounds.errors:
+                await send_buses(ws, bounds)
         except ConnectionClosed:
             break
         await trio.sleep(0.1)
 
 
-async def browser_proccess(request):
+async def process_to_browser(request):
     ws = await request.accept()
     bounds = WindowBounds()
     # Here we use mutable arg "bounds" (changes in function "listen_browser")
@@ -144,7 +146,7 @@ async def browser_proccess(request):
         nursery.start_soon(talk_to_browser, ws, bounds)
 
 
-async def gates_listener(request):
+async def listen_gates(request):
     global buses
     ws = await request.accept()
     while True:
@@ -174,15 +176,13 @@ async def gates_listener(request):
 @click.option("--log", '-l', is_flag=True, default=False, help="Enable logging", show_default=True)
 async def main(imitator_host, imitator_port, browser_port, log):
     if not log:
-        logger = logging.getLogger('app_logger')
         logger.disabled = True
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(serve_websocket, gates_listener, imitator_host, imitator_port, None)
-        nursery.start_soon(serve_websocket, browser_proccess, '127.0.0.1', browser_port, None)
+        nursery.start_soon(serve_websocket, listen_gates, imitator_host, imitator_port, None)
+        nursery.start_soon(serve_websocket, process_to_browser, '127.0.0.1', browser_port, None)
 
 if __name__ == '__main__':
     with suppress(KeyboardInterrupt):
-        logger = logging.getLogger('app_logger')
         handler = logging.StreamHandler()
         logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)
