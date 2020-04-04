@@ -13,7 +13,6 @@ import trio_asyncio
 from async_timeout import timeout
 from trio_asyncio import aio_as_trio, trio_as_aio
 
-
 from load_routes import load_routes
 
 logger = logging.getLogger('app_logger')
@@ -27,10 +26,12 @@ def relaunch_on_disconnect(async_function, *args, **kwargs):
             try:
                 await async_function(*args, **kwargs)
             except (
+                    aioamqp.exceptions.AmqpClosedConnection,
                     OSError,
             ) as e:
                 logger.error(f'Error: {e}.\nTry reconnect in 2 sec ')
                 await asyncio.sleep(2)
+
     return run_fake_bus
 
 
@@ -52,8 +53,6 @@ async def run_bus(send_channel, bus_id, route):
                     "route": route['name']
                 }, ensure_ascii=False)
                 await send_channel.send(data_for_send)
-                await trio.sleep(0.1)
-
             first_run = False
 
 
@@ -64,22 +63,19 @@ def generate_bus_id(route_id, bus_index, emulator_id):
     return uniq_bus_id
 
 
-async def connect_to_rabbit():
-    transport, protocol = await aioamqp.connect(
-        login_method="PLAIN",
-        login="rabbitmq",
-        password="rabbitmq"
-    )
-    return transport, protocol
-
-
 @asynccontextmanager
-async def rabbit_connection():
+async def rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port):
     transport, protocol = None, None
     try:
-        transport, protocol = await connect_to_rabbit()
+        transport, protocol = transport, protocol = await aioamqp.connect(
+            login_method="PLAIN",
+            login=rabbit_user,
+            password=rabbit_pass,
+            host=rabbit_host,
+            port=rabbit_port,
+        )
         channel = await protocol.channel()
-        await channel.queue_declare(queue_name='buses')
+        await channel.exchange_declare(exchange_name='buses', type_name='direct')
         yield channel
     finally:
         logger.debug("Stopping rabbit")
@@ -96,14 +92,14 @@ async def rabbit_connection():
 
 @aio_as_trio
 @relaunch_on_disconnect
-async def process_rabbit(receive_channel, refresh_timeout):
-    async with rabbit_connection() as conn:
+async def process_rabbit(receive_channel, refresh_timeout, rabbit_user, rabbit_pass, rabbit_host, rabbit_port):
+    async with rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port) as conn:
         async for value in trio_as_aio(receive_channel):
             logger.debug(f"Sent {value}")
-            await conn.basic_publish(
+            await conn.publish(
                 payload=value,
-                exchange_name='',
-                routing_key='buses'
+                exchange_name='buses',
+                routing_key=''
             )
             await asyncio.sleep(refresh_timeout)
 
@@ -112,19 +108,26 @@ async def process_rabbit(receive_channel, refresh_timeout):
 @click.option("--routes_number", '-r', default=10, help="Number of routes.", show_default=True)
 @click.option("--buses_per_route", '-b', default=5, help="Number of buses per one route", show_default=True)
 @click.option("--emulator_id", '-e', default=None, help="ID for buses", show_default=True)
-@click.option("--refresh_timeout", '-rt', default=0.1, help="Timeout for refresh (in secs)", show_default=True)
+@click.option("--refresh_timeout", '-rt', default=0.03, help="Timeout for refresh (in secs)", show_default=True)
 @click.option("--log", '-l', is_flag=True, default=False, help="Enable logging", show_default=True)
-@click.option("--host", '-h', default='127.0.0.1', help="Destination host", show_default=True)
-@click.option("--port", '-p', default='8080', help="Destination port", show_default=True)
-async def main(routes_number, buses_per_route, emulator_id, refresh_timeout, log, host, port):
+@click.option("--rabbit_user", '-ru', default="rabbitmq", help="Login for RabbitMQ", show_default=True)
+@click.option("--rabbit_pass", '-rpass', default="rabbitmq", help="Password for RabbitMQ", show_default=True)
+@click.option("--rabbit_host", '-rh', default="127.0.0.1", help="RabbitMQ host", show_default=True)
+@click.option("--rabbit_port", '-rp', default=5672, help="RabbitMQ port", show_default=True)
+async def main(
+        routes_number, buses_per_route, emulator_id, refresh_timeout,
+        log, rabbit_user, rabbit_pass, rabbit_host, rabbit_port
+):
     if not log:
-        logger.disabled = True
+        logger.setLevel(logging.ERROR)
     async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(trio_asyncio.open_loop())
         nursery = await stack.enter_async_context(trio.open_nursery())
         send_channel, receive_channel = trio.open_memory_channel(0)
         processed_routes = 0
-        nursery.start_soon(process_rabbit, receive_channel, refresh_timeout)
+        nursery.start_soon(
+            process_rabbit, receive_channel, refresh_timeout, rabbit_user, rabbit_pass, rabbit_host, rabbit_port
+        )
         for route in load_routes(routes_count=routes_number):
             for bus in range(buses_per_route):
                 random_bus_index = random.randint(99, 9999)
