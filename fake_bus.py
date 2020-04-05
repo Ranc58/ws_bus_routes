@@ -75,9 +75,8 @@ async def rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port):
             port=rabbit_port,
         )
         channel = await protocol.channel()
-        await channel.exchange_declare(exchange_name='buses', type_name='direct')
         args = {"x-message-ttl": 5 * 1000}  # 5 sec
-        await channel.queue(queue_name='buses_queue', durable=False, arguments=args)
+        await channel.queue_declare(queue_name='buses', arguments=args)
         yield channel
     finally:
         logger.debug("Stopping rabbit")
@@ -98,10 +97,10 @@ async def process_rabbit(receive_channel, refresh_timeout, rabbit_user, rabbit_p
     async with rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port) as conn:
         async for value in trio_as_aio(receive_channel):
             logger.debug(f"Sent {value}")
-            await conn.publish(
+            await conn.basic_publish(
                 payload=value,
-                exchange_name='buses',
-                routing_key=''
+                exchange_name='',
+                routing_key='buses'
             )
             await asyncio.sleep(refresh_timeout)
 

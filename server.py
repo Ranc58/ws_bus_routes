@@ -76,9 +76,8 @@ async def rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port):
             port=rabbit_port,
         )
         channel = await protocol.channel()
-        await channel.exchange(exchange_name='buses', type_name='direct')
         args = {"x-message-ttl": 5*1000} # 5 sec
-        result = await channel.queue(queue_name='buses_queue', durable=False, arguments=args)
+        result = await channel.queue_declare(queue_name='buses', arguments=args)
         queue_name = result['queue']
         yield queue_name, channel
     finally:
@@ -101,11 +100,6 @@ async def callback(channel, body, envelope, properties):
 @relaunch_on_disconnect
 async def listen_rabbit(rabbit_user, rabbit_pass, rabbit_host, rabbit_port):
     async with rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port) as (queue_name, channel):
-        await channel.queue_bind(
-            exchange_name='buses',
-            queue_name=queue_name,
-            routing_key='',
-        )
         while True:
             await channel.basic_consume(callback, queue_name=queue_name, no_ack=True)
             await asyncio.sleep(1)
