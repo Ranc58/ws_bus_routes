@@ -76,6 +76,8 @@ async def rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port):
         )
         channel = await protocol.channel()
         await channel.exchange_declare(exchange_name='buses', type_name='direct')
+        args = {"x-message-ttl": 5 * 1000}  # 5 sec
+        await channel.queue(queue_name='buses_queue', durable=False, arguments=args)
         yield channel
     finally:
         logger.debug("Stopping rabbit")

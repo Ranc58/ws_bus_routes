@@ -77,7 +77,8 @@ async def rabbit_connection(rabbit_user, rabbit_pass, rabbit_host, rabbit_port):
         )
         channel = await protocol.channel()
         await channel.exchange(exchange_name='buses', type_name='direct')
-        result = await channel.queue(queue_name='', exclusive=True, durable=False)
+        args = {"x-message-ttl": 5*1000} # 5 sec
+        result = await channel.queue(queue_name='buses_queue', durable=False, arguments=args)
         queue_name = result['queue']
         yield queue_name, channel
     finally:
